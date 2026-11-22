@@ -26,7 +26,7 @@
   #list { padding: 12px; display: flex; flex-direction: column; gap: 10px; max-width: 640px; margin: 0 auto; }
   .row { position: relative; border-radius: 16px; overflow: hidden; }
   .swipe-del { position: absolute; top: 0; right: 0; bottom: 0; width: 96px; background: #ff453a; color: #fff;
-    border: 0; font-size: 16px; font-weight: 600; visibility: hidden; }
+    border: 0; border-radius: 16px; font-size: 16px; font-weight: 600; visibility: hidden; }
   .card { touch-action: pan-y; position: relative; will-change: transform; background: #050d17; border: 1px solid rgba(255,255,255,.08); border-radius: 16px;
     padding: 12px 14px; display: flex; align-items: center; gap: 10px; }
   .info { flex: 1; min-width: 0; }
@@ -51,7 +51,7 @@
   </button>
 </header>
 <div id="list"></div>
-
+ 
 <script>
 // Each stopwatch stores a start TIMESTAMP, so elapsed time is recalculated from the clock.
 // It stays correct when the phone is locked, the app is closed, or you're offline.
@@ -64,10 +64,10 @@ if (!state || !Array.isArray(state.items)) {
 }
 let editing = false;
 const refs = {};
-
+ 
 function save() { try { localStorage.setItem(KEY, JSON.stringify(state)); } catch (e) {} }
 const elapsed = (it, now) => it.acc + (it.start ? Math.max(0, now - it.start) : 0);
-
+ 
 function clock(ms) {
   const tenths = Math.floor(ms / 100);
   const h = Math.floor(tenths / 36000), m = Math.floor(tenths / 600) % 60,
@@ -77,13 +77,13 @@ function clock(ms) {
 }
 // 1h 30m -> "1.50 hours"
 const decimalHours = ms => (ms / 3600000).toFixed(2) + ' hours';
-
+ 
 const PLAY = '<svg viewBox="0 0 24 24"><path d="M8 5v14l11-7z"/></svg>';
 const PAUSE = '<svg viewBox="0 0 24 24"><path d="M7 5h3.5v14H7zM13.5 5H17v14h-3.5z"/></svg>';
 const RESET = '<svg class="stroke" viewBox="0 0 24 24"><path d="M4 12a8 8 0 1 0 2.6-5.9M4 4v4.5h4.5"/></svg>';
-
+ 
 // Swipe a stopwatch left to reveal Delete, then tap Delete. Swipe back or tap elsewhere to cancel.
-const REVEAL = 96;
+const REVEAL = 104; // 96px button + 8px gap
 let openRow = null;
 function attachSwipe(row, card, bg) {
   let sx = 0, sy = 0, base = 0, dx = 0, axis = null;
@@ -117,7 +117,7 @@ function attachSwipe(row, card, bg) {
 document.addEventListener('touchstart', e => {
   if (openRow && !openRow.contains(e.target)) openRow._close();
 }, { passive: true });
-
+ 
 function render() {
   const list = document.getElementById('list');
   list.textContent = '';
@@ -158,7 +158,7 @@ function render() {
   }
   tick();
 }
-
+ 
 function tick() {
   const now = Date.now();
   for (const it of state.items) {
@@ -168,7 +168,7 @@ function tick() {
     r.d.textContent = decimalHours(ms);
   }
 }
-
+ 
 document.getElementById('add').onclick = () => {
   state.counter = (state.counter || state.items.length) + 1;
   state.items.unshift({ id: uid(), name: 'Stopwatch ' + state.counter, acc: 0, start: null });
@@ -177,7 +177,7 @@ document.getElementById('add').onclick = () => {
 document.getElementById('edit').onclick = e => {
   editing = !editing; e.target.textContent = editing ? 'Done' : 'Edit'; render();
 };
-
+ 
 setInterval(tick, 100);
 document.addEventListener('visibilitychange', tick);
 window.addEventListener('pageshow', tick);
@@ -191,3 +191,4 @@ render();
 </script>
 </body>
 </html>
+ 
