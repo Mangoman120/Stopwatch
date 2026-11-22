@@ -1,0 +1,213 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
+<title>Stopwatches</title>
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="apple-touch-icon" href="icon-180.png">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-title" content="Stopwatches">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="theme-color" content="#5F8F38">
+<style>
+  :root { color-scheme: dark; --hh: calc(env(safe-area-inset-top, 0px) + 52px); }
+  * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+  html, body { margin: 0; background: #000; color: #fff; height: 100%; overflow: hidden; touch-action: manipulation;
+    font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", Helvetica, Arial, sans-serif; }
+  body { padding-top: var(--hh); display: flex; flex-direction: column; -webkit-user-select: none; user-select: none; }
+  input { -webkit-user-select: text; user-select: text; }
+  header { background: #5F8F38; display: flex; align-items: center; justify-content: space-between;
+    position: fixed; top: 0; left: 0; right: 0; z-index: 10; height: var(--hh); padding: env(safe-area-inset-top, 0px) 12px 0; }
+  header h1 { font-size: 17px; font-weight: 600; margin: 0; }
+  .pill { background: rgba(0,0,0,.28); color: #fff; border: 0; border-radius: 999px; height: 36px;
+    padding: 0 16px; font-size: 16px; display: flex; align-items: center; justify-content: center; }
+  .pill.plus { width: 46px; padding: 0; }
+  #list { flex: 1; min-height: 0; width: 100%; overflow-y: auto; -webkit-overflow-scrolling: touch; overscroll-behavior: contain;
+    padding: 12px 12px calc(12px + env(safe-area-inset-bottom, 0px)); display: flex; flex-direction: column; gap: 10px;
+    max-width: 640px; margin: 0 auto; align-content: start; }
+  #list > .row { flex: none; }
+  .row { position: relative; border-radius: 16px; overflow: hidden; }
+  .swipe-del { position: absolute; top: 0; right: 0; bottom: 0; width: 96px; background: #ff453a; color: #fff;
+    border: 0; border-radius: 16px; font-size: 16px; font-weight: 600; visibility: hidden; }
+  .card { touch-action: pan-y; position: relative; will-change: transform; background: #050d17; border: 1px solid rgba(255,255,255,.08); border-radius: 16px;
+    padding: 12px 14px; display: flex; align-items: center; gap: 10px; }
+  .info { flex: 1; min-width: 0; }
+  .name { width: 100%; background: transparent; border: 0; outline: 0; color: #fff; font-size: 16px; padding: 0; }
+  .time { font-size: 40px; font-variant-numeric: tabular-nums; line-height: 1.15; }
+  .dec { font-size: 17px; color: rgba(255,255,255,.65); font-variant-numeric: tabular-nums; }
+  .btn { border: 0; border-radius: 50%; display: flex; align-items: center; justify-content: center; color: #fff; flex: none; }
+  .go { width: 48px; height: 48px; background: #30d158; }
+  .go.run { background: #ff9f0a; }
+  .rst { width: 42px; height: 42px; background: rgba(255,255,255,.12); }
+  .del { width: 28px; height: 28px; background: #ff453a; font-size: 22px; line-height: 1; padding-bottom: 3px; }
+  svg { width: 22px; height: 22px; fill: currentColor; }
+  svg.stroke { fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; }
+</style>
+</head>
+<body>
+<header>
+  <button class="pill" id="edit">Edit</button>
+  <h1>Stopwatches</h1>
+  <button class="pill plus" id="add" aria-label="Add stopwatch">
+    <svg class="stroke" viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></svg>
+  </button>
+</header>
+<div id="list"></div>
+
+<script>
+// Each stopwatch stores a start TIMESTAMP, so elapsed time is recalculated from the clock.
+// It stays correct when the phone is locked, the app is closed, or you're offline.
+const KEY = 'stopwatches.v1';
+const uid = () => Date.now().toString(36) + Math.random().toString(36).slice(2);
+let state = null;
+try { state = JSON.parse(localStorage.getItem(KEY)); } catch (e) {}
+if (!state || !Array.isArray(state.items)) {
+  state = { items: [{ id: uid(), name: 'Stopwatch 1', acc: 0, start: null }], counter: 1 };
+}
+let editing = false;
+const refs = {};
+
+function save() { try { localStorage.setItem(KEY, JSON.stringify(state)); } catch (e) {} }
+const elapsed = (it, now) => it.acc + (it.start ? Math.max(0, now - it.start) : 0);
+
+function clock(ms) {
+  const tenths = Math.floor(ms / 100);
+  const h = Math.floor(tenths / 36000), m = Math.floor(tenths / 600) % 60,
+        s = Math.floor(tenths / 10) % 60, d = tenths % 10;
+  const p = n => String(n).padStart(2, '0');
+  return h > 0 ? `${h}:${p(m)}:${p(s)}.${d}` : `${p(m)}:${p(s)}.${d}`;
+}
+// 1h 30m -> "1.50 hours"
+const decimalHours = ms => (ms / 3600000).toFixed(2) + ' hours';
+
+const PLAY = '<svg viewBox="0 0 24 24"><path d="M8 5v14l11-7z"/></svg>';
+const PAUSE = '<svg viewBox="0 0 24 24"><path d="M7 5h3.5v14H7zM13.5 5H17v14h-3.5z"/></svg>';
+const RESET = '<svg class="stroke" viewBox="0 0 24 24"><path d="M4 12a8 8 0 1 0 2.6-5.9M4 4v4.5h4.5"/></svg>';
+
+// Swipe a stopwatch left to reveal Delete, then tap Delete. Swipe back or tap elsewhere to cancel.
+const REVEAL = 104; // 96px button + 8px gap
+let openRow = null;
+function attachSwipe(row, card, bg) {
+  let sx = 0, sy = 0, base = 0, dx = 0, axis = null;
+  row._open = false;
+  const set = (x, anim) => { card.style.transition = anim ? 'transform .2s ease' : 'none'; card.style.transform = 'translateX(' + x + 'px)'; };
+  row._close = () => {
+    row._open = false; set(0, true);
+    setTimeout(() => { if (!row._open) bg.style.visibility = 'hidden'; }, 220);
+    if (openRow === row) openRow = null;
+  };
+  card.addEventListener('touchstart', e => {
+    const t = e.touches[0]; sx = t.clientX; sy = t.clientY; axis = null;
+    base = row._open ? -REVEAL : 0; dx = base;
+    if (openRow && openRow !== row) openRow._close();
+  }, { passive: true });
+  card.addEventListener('touchmove', e => {
+    const t = e.touches[0], mx = t.clientX - sx, my = t.clientY - sy;
+    if (!axis) { if (Math.abs(mx) < 6 && Math.abs(my) < 6) return; axis = Math.abs(mx) > Math.abs(my) ? 'x' : 'y'; }
+    if (axis !== 'x') return;
+    dx = Math.min(0, Math.max(-REVEAL - 30, base + mx));
+    bg.style.visibility = 'visible'; set(dx, false);
+  }, { passive: true });
+  card.addEventListener('touchend', () => {
+    if (axis !== 'x') return;
+    if (dx < -REVEAL / 2) { row._open = true; openRow = row; set(-REVEAL, true); } else { row._close(); }
+  }, { passive: true });
+  card.addEventListener('click', e => {
+    if (row._open) { e.preventDefault(); e.stopPropagation(); row._close(); }
+  }, true);
+}
+document.addEventListener('touchstart', e => {
+  if (openRow && !openRow.contains(e.target)) openRow._close();
+}, { passive: true });
+
+function render() {
+  const list = document.getElementById('list');
+  list.textContent = '';
+  for (const k in refs) delete refs[k];
+  openRow = null;
+  for (const it of state.items) {
+    const card = document.createElement('div'); card.className = 'card';
+    if (editing) {
+      const del = document.createElement('button'); del.className = 'btn del'; del.textContent = '\u2212';
+      del.onclick = () => { state.items = state.items.filter(x => x.id !== it.id); save(); render(); };
+      card.appendChild(del);
+    }
+    const info = document.createElement('div'); info.className = 'info';
+    const name = document.createElement('input'); name.className = 'name'; name.value = it.name;
+    name.enterKeyHint = 'done'; name.autocomplete = 'off';
+    name.oninput = () => { it.name = name.value; save(); };
+    let fresh = false;
+    name.addEventListener('focus', () => {
+      fresh = true;
+      const all = () => { try { name.setSelectionRange(0, name.value.length); } catch (e) {} };
+      all(); [0, 50, 150, 300].forEach(ms => setTimeout(all, ms));
+      setTimeout(() => { fresh = false; }, 400);
+    });
+    name.addEventListener('mouseup', e => { if (fresh) e.preventDefault(); });
+    name.onkeydown = e => { if (e.key === 'Enter') name.blur(); };
+    const t = document.createElement('div'); t.className = 'time';
+    const d = document.createElement('div'); d.className = 'dec';
+    info.append(name, t, d);
+    const go = document.createElement('button'); go.className = 'btn go' + (it.start ? ' run' : '');
+    go.innerHTML = it.start ? PAUSE : PLAY;
+    go.onclick = () => {
+      const now = Date.now();
+      if (it.start) { it.acc += Math.max(0, now - it.start); it.start = null; } else { it.start = now; }
+      save(); render();
+    };
+    const rst = document.createElement('button'); rst.className = 'btn rst'; rst.innerHTML = RESET;
+    rst.onclick = () => { it.acc = 0; it.start = null; save(); render(); };
+    card.append(info, go, rst);
+    const row = document.createElement('div'); row.className = 'row';
+    const bg = document.createElement('button'); bg.className = 'swipe-del'; bg.textContent = 'Delete';
+    bg.onclick = () => { state.items = state.items.filter(x => x.id !== it.id); save(); render(); };
+    row.append(bg, card);
+    list.appendChild(row);
+    attachSwipe(row, card, bg);
+    refs[it.id] = { t, d };
+  }
+  tick();
+}
+
+function tick() {
+  const now = Date.now();
+  for (const it of state.items) {
+    const r = refs[it.id]; if (!r) continue;
+    const ms = elapsed(it, now);
+    r.t.textContent = clock(ms);
+    r.d.textContent = decimalHours(ms);
+  }
+}
+
+function nextName() {
+  const used = new Set(state.items.map(i => i.name.trim().toLowerCase()));
+  let n = 1;
+  while (used.has('stopwatch ' + n)) n++;
+  return 'Stopwatch ' + n;
+}
+document.getElementById('add').onclick = () => {
+  state.items.unshift({ id: uid(), name: nextName(), acc: 0, start: null });
+  save(); render();
+};
+document.getElementById('edit').onclick = e => {
+  editing = !editing; e.target.textContent = editing ? 'Done' : 'Edit'; render();
+};
+
+['gesturestart', 'gesturechange', 'gestureend'].forEach(g => document.addEventListener(g, e => e.preventDefault()));
+document.addEventListener('touchmove', e => { if (e.touches.length > 1) e.preventDefault(); }, { passive: false });
+document.addEventListener('dblclick', e => e.preventDefault());
+setInterval(tick, 100);
+document.addEventListener('visibilitychange', tick);
+window.addEventListener('pageshow', tick);
+if (navigator.storage && navigator.storage.persist) navigator.storage.persist();
+if ('serviceWorker' in navigator) {
+  const hadController = !!navigator.serviceWorker.controller;
+  navigator.serviceWorker.addEventListener('controllerchange', () => { if (hadController) location.reload(); });
+  navigator.serviceWorker.register('sw.js');
+}
+render();
+</script>
+</body>
+</html>
